@@ -4,12 +4,19 @@
   "description": "",
   "main": "index.js",
   "private": true,
-
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@10.33.0"
+  "packageManager": "pnpm@11.3.0",
+  "dependencies": {
+    "@crawler/api": "workspace:*",
+    "@crawler/core": "workspace:*",
+    "@crawler/db": "workspace:*"
+  },
+  "devDependencies": {
+    "turbo": "^2.9.14"
+  }
 }

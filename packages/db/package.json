@@ -1,10 +1,10 @@
 {
-  "name": "@crawler/core",
+  "name": "@crawler/db",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "type": "module",
   "private": true,
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -13,13 +13,14 @@
   "license": "ISC",
   "packageManager": "pnpm@10.33.0",
   "dependencies": {
-    "@crawler/db": "workspace:*",
-    "@mozilla/readability": "^0.6.0",
+    "@fastify/postgres": "^6.0.2",
+    "@fastify/redis": "^7.2.0",
     "@prisma/client": "^7.8.0",
-    "@types/node-fetch": "^2.6.13",
-    "cheerio": "^1.2.0",
-    "jsdom": "^29.1.1",
-    "node-fetch": "^3.3.2"
+    "crypto-ts": "^1.0.2",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.8.5",
+    "fastify-plugin": "^5.1.0",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

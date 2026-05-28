@@ -14,6 +14,7 @@
   "packageManager": "pnpm@10.33.0",
   "dependencies": {
     "@crawler/core": "workspace:*",
+    "@crawler/db": "workspace:*",
     "@fastify/postgres": "^6.0.2",
     "@fastify/redis": "^7.2.0",
     "@prisma/client": "^7.8.0",

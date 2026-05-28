@@ -1,0 +1,129 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // url      = env("DATABASE_URL")
+}
+
+enum UserPlan {
+  free
+  pro
+  enterprise
+}
+
+enum CrawlJobStatus {
+  pending
+  running
+  paused
+  done
+  failed
+}
+
+enum FrontierUrlStatus {
+  queued
+  leased
+  crawled
+  failed
+}
+
+model User {
+  id         String     @id @default(uuid()) @db.Uuid
+  email      String     @unique
+  apiKey     String     @unique @map("api_key")
+  plan       UserPlan   @default(free)
+  quotaUrls  Int        @default(10000) @map("quota_urls")
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  crawlJobs  CrawlJob[]
+
+  @@map("users")
+}
+
+model CrawlJob {
+  id          String           @id @default(uuid()) @db.Uuid
+  userId      String           @map("user_id") @db.Uuid
+  name        String?
+  status      CrawlJobStatus   @default(pending)
+  config      Json
+  seedUrls    String[]         @map("seed_urls")
+  depth       Int              @default(2)
+  maxPages    Int              @default(500) @map("max_pages")
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  startedAt   DateTime?        @map("started_at") @db.Timestamptz
+  finishedAt  DateTime?        @map("finished_at") @db.Timestamptz
+
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  derivedResults  DerivedResult[]
+  frontierUrls    FrontierUrl[]
+  jobStats        JobStat?
+
+  @@index([userId])
+  @@index([status])
+  @@map("crawl_jobs")
+}
+
+model RawPage {
+  id           String           @id @default(uuid()) @db.Uuid
+  url          String
+  contentHash  String           @unique @map("content_hash")
+  blobUrl      String           @map("blob_url")
+  httpStatus   Int?             @map("http_status")
+  headers      Json?
+  fetchedAt    DateTime         @default(now()) @map("fetched_at") @db.Timestamptz
+  byteSize     Int?             @map("byte_size")
+
+  derivedResults DerivedResult[]
+
+  @@index([url])
+  @@map("raw_pages")
+}
+
+model DerivedResult {
+  id             String     @id @default(uuid()) @db.Uuid
+  jobId          String     @map("job_id") @db.Uuid
+  rawPageId      String     @map("raw_page_id") @db.Uuid
+  componentType  String     @map("component_type")
+  derivedData    Json       @map("derived_data")
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  crawlJob   CrawlJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  rawPage    RawPage  @relation(fields: [rawPageId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([jobId, componentType])
+  @@map("derived_results")
+}
+
+model FrontierUrl {
+  id          Int                 @id @default(autoincrement())
+  jobId       String              @map("job_id") @db.Uuid
+  url         String
+  priority    Float               @default(0)
+  depth       Int                 @default(0)
+  status      FrontierUrlStatus   @default(queued)
+  addedAt     DateTime            @default(now()) @map("added_at") @db.Timestamptz
+  crawledAt   DateTime?           @map("crawled_at") @db.Timestamptz
+  leaseUntil  DateTime?           @map("lease_until") @db.Timestamptz
+  retryCount  Int                 @default(0) @map("retry_count")
+
+  crawlJob CrawlJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, status])
+  @@index([leaseUntil])
+  @@map("frontier_urls")
+}
+
+model JobStat {
+  jobId         String    @id @map("job_id") @db.Uuid
+  urlsCrawled   Int       @default(0) @map("urls_crawled")
+  urlsQueued    Int       @default(0) @map("urls_queued")
+  urlsFailed    Int       @default(0) @map("urls_failed")
+  bytesFetched  BigInt    @default(0) @map("bytes_fetched")
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  crawlJob CrawlJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@map("job_stats")
+}
