@@ -5,7 +5,7 @@ async function main() {
   // 1. Create a minimal job row
   const job = await db.crawlJob.create({
     data: {
-      user_id: 'YOUR_TEST_USER_UUID',  // seed a users row first
+      userId: "test",  // seed a users row first
       name: 'M1 smoke test',
       status: 'pending',
       config: { fetcher: 'http', parser: 'readability', strategy: 'bfs' },
@@ -19,9 +19,9 @@ async function main() {
   await runWorker(job.id);
 
   // 2. Verify
-  const results = await db.derived_results.findMany({ where: { job_id: job.id } });
+  const results = await db.derivedResult.findMany({ where: { jobId: job.id } });
   console.log(`derived_results rows: ${results.length}`);
-  console.log(JSON.stringify(results[0]?.derived_data, null, 2));
+  console.log(JSON.stringify(results[0]?.derivedData, null, 2));
 }
 
 main().catch(console.error).finally(() => db.$disconnect());

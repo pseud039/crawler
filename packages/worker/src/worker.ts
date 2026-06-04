@@ -3,7 +3,7 @@ import { db } from "@crawler/db/src/prisma.js";
 import { HttpFetcher } from "@crawler/core/src/components/fetchers/http.fetcher.js";
 import { ReadabilityParser } from "@crawler/core/src/components/parsers/readability.js";
 import { BfsStrategy } from '@crawler/core/src/components/strategies/bfs.strategies.js';
-import { FrontierUrlStatus, CrawlJobStatus } from '@crawler/db/prisma/migrations/20260530215904_db_setup/migration';
+import { CrawlJobStatus, FrontierUrlStatus } from '@crawler/db/src/prisma.js';
 import crypto from 'crypto';
 
 async function processUrl(jobId: string, urlRow: { id: number; url: string; depth: number }) {

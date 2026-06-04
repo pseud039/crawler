@@ -1,4 +1,6 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from "@prisma/client";
+export { CrawlJobStatus, FrontierUrlStatus, UserPlan } from '@prisma/client'
 
-// one instance across the whole app
-export const db = new PrismaClient()
+export const db = new PrismaClient({
+  log: ["query"],
+});
