@@ -2,11 +2,7 @@ import { Readability } from '@mozilla/readability'
 import * as cheerio from 'cheerio'
 import type { ParserComponent } from '../../interfaces/parsers.interface.js'
 import type { ParseResult } from '../../types/shared.js'
-const { JSDOM } = require('jsdom') as {
-  JSDOM: new (html: string, options?: { url?: string }) => {
-    window: { document: Document }
-  }
-}
+import { JSDOM } from 'jsdom'
 
 export class ReadabilityParser implements ParserComponent {
   name = 'readability'

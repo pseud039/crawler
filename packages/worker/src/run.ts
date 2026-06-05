@@ -1,18 +1,29 @@
 import { runWorker } from './worker.js';
-import { db } from '@crawler/db/src/prisma.js';
+import { db, CrawlJobStatus, UserPlan } from '@crawler/db/src/prisma.js';
 
 async function main() {
+  // Ensure a user exists (seed inline for the smoke test)
+  const user = await db.user.upsert({
+    where: { email: 'demo@nexusseo.com' },
+    update: {},
+    create: {
+      email: 'demo@nexusseo.com',
+      apiKey: 'demo-api-key',
+      plan: UserPlan.free,
+    },
+  });
+
   // 1. Create a minimal job row
   const job = await db.crawlJob.create({
     data: {
-      userId: "test",  // seed a users row first
+      userId: user.id,
       name: 'M1 smoke test',
-      status: 'pending',
+      status: CrawlJobStatus.pending,
       config: { fetcher: 'http', parser: 'readability', strategy: 'bfs' },
-      seed_urls: ['https://example.com'],
+      seedUrls: ['https://example.com'],
       depth: 1,
-      max_pages: 5,
-    }
+      maxPages: 5,
+    },
   });
 
   console.log('Job created:', job.id);
