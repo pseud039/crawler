@@ -5,20 +5,24 @@ import { ReadabilityParser } from "@crawler/core/src/components/parsers/readabil
 import { BfsStrategy } from '@crawler/core/src/components/strategies/bfs.strategies.js';
 import { CrawlJobStatus, FrontierUrlStatus } from '@crawler/db/src/prisma.js';
 import crypto from 'crypto';
+import {
+  seedFrontier,
+  acquireUrl,
+  releaseUrl,
+  pushUrls,
+  recoverExpiredLeases,
+} from '@crawler/core/src/frontier/frontier.js';
 
-async function processUrl(jobId: string, urlRow: { id: number; url: string; depth: number }) {
+// Now returns ScoredUrl[] so the worker loop can push to Redis
+async function processUrl(jobId: string, url: string, depth: number) {
   const fetcher = new HttpFetcher();
   const parser = new ReadabilityParser();
   const strategy = new BfsStrategy();
 
   // 1. Fetch
-  const fetchResult = await fetcher.fetch(urlRow.url);
+  const fetchResult = await fetcher.fetch(url);
   if (fetchResult.error || fetchResult.statusCode >= 400) {
-    await db.frontierUrl.update({
-      where: { id: urlRow.id },
-      data: { status: FrontierUrlStatus.failed, crawledAt: new Date() }
-    });
-    return;
+    return [];  // signal failure — releaseUrl(false) handled in caller
   }
 
   // 2. Store raw_page (deduped by content_hash)
@@ -28,7 +32,7 @@ async function processUrl(jobId: string, urlRow: { id: number; url: string; dept
   if (!rawPage) {
     rawPage = await db.rawPage.create({
       data: {
-        url: urlRow.url,
+        url,
         contentHash: hash,
         blobUrl: `pages/${hash}.html`,
         httpStatus: fetchResult.statusCode,
@@ -40,9 +44,9 @@ async function processUrl(jobId: string, urlRow: { id: number; url: string; dept
   }
 
   // 3. Parse
-  const parseResult = await parser.parse(fetchResult.html, urlRow.url);
+  const parseResult = await parser.parse(fetchResult.html, url);
 
-  // 4. Get job config for depth limit
+  // 4. Get job config for depth check
   const job = await db.crawlJob.findUniqueOrThrow({ where: { id: jobId } });
 
   // 5. Store derived_result
@@ -60,27 +64,7 @@ async function processUrl(jobId: string, urlRow: { id: number; url: string; dept
     }
   });
 
-  // 6. BFS: select + push discovered links (if depth allows)
-  if (urlRow.depth < job.depth) {
-    const scoredUrls = await strategy.selectLinks(parseResult.links, parseResult, job.config as any);
-
-    await db.frontierUrl.createMany({
-      data: scoredUrls.map(({ url }) => ({
-        jobId,
-        url,
-        depth: urlRow.depth + 1,
-        status: FrontierUrlStatus.queued,
-      })),
-      skipDuplicates: true,
-    });
-  }
-
-  // 7. Mark as crawled + update stats
-  await db.frontierUrl.update({
-    where: { id: urlRow.id },
-    data: { status: FrontierUrlStatus.crawled, crawledAt: new Date() }
-  });
-
+  // 6. Update stats
   await db.jobStat.update({
     where: { jobId },
     data: {
@@ -89,6 +73,12 @@ async function processUrl(jobId: string, urlRow: { id: number; url: string; dept
       updatedAt: new Date(),
     }
   });
+
+  // 7. Return scored links if depth allows — worker loop pushes to Redis
+  if (depth < job.depth) {
+    return strategy.selectLinks(parseResult.links, parseResult, job.config as any);
+  }
+  return [];
 }
 
 export async function runWorker(jobId: string) {
@@ -96,18 +86,8 @@ export async function runWorker(jobId: string) {
 
   const job = await db.crawlJob.findUniqueOrThrow({ where: { id: jobId } });
 
-  // Seed frontier if empty
-  const frontierCount = await db.frontierUrl.count({ where: { jobId } });
-  if (frontierCount === 0) {
-    await db.frontierUrl.createMany({
-      data: job.seedUrls.map(url => ({
-        jobId,
-        url,
-        depth: 0,
-        status: FrontierUrlStatus.queued,
-      }))
-    });
-  }
+  // Seed Redis frontier from job's seedUrls
+  await seedFrontier(jobId, job.seedUrls);
 
   // Init job_stats row if missing
   await db.jobStat.upsert({
@@ -122,44 +102,52 @@ export async function runWorker(jobId: string) {
     data: { status: CrawlJobStatus.running, startedAt: new Date() }
   });
 
-  // Main loop
-  while (true) {
-    const urlRow = await db.frontierUrl.findFirst({
-      where: { jobId, status: FrontierUrlStatus.queued },
-      orderBy: { addedAt: 'asc' }
-    });
+  // Lease recovery every 30s
+  const recovery = setInterval(() => recoverExpiredLeases(jobId), 30_000);
 
-    if (!urlRow) {
-      console.log(`[worker] frontier empty — job ${jobId} done`);
-      await db.crawlJob.update({
-        where: { id: jobId },
-        data: { status: CrawlJobStatus.done, finishedAt: new Date() }
+  try {
+    while (true) {
+      const url = await acquireUrl(jobId);
+
+      if (!url) {
+        console.log(`[worker] frontier empty — job ${jobId} done`);
+        break;
+      }
+
+      // depth tracking: read from Postgres frontier row
+      const frontierRow = await db.frontierUrl.findFirst({
+        where: { jobId, url, status: FrontierUrlStatus.leased },
+        select: { depth: true },
       });
-      break;
-    }
+      const depth = frontierRow?.depth ?? 0;
 
-    // Lease it
-    await db.frontierUrl.update({
-      where: { id: urlRow.id },
-      data: { status: FrontierUrlStatus.leased }
-    });
+      try {
+        const scoredUrls = await processUrl(jobId, url, depth);
 
-    try {
-      await processUrl(jobId, urlRow);
-    } catch (err) {
-      console.error(`[worker] error on ${urlRow.url}:`, err);
-      await db.frontierUrl.update({
-        where: { id: urlRow.id },
-        data: {
-          status: FrontierUrlStatus.failed,
-          crawledAt: new Date(),
-          retryCount: { increment: 1 },
+        // Push discovered links into Redis + Postgres
+        if (scoredUrls.length > 0) {
+          await pushUrls(jobId, scoredUrls.map(u => ({
+            url: u.url,
+            priority: u.priority,
+            depth: depth + 1,
+          })));
         }
-      });
-      await db.jobStat.update({
-        where: { jobId },
-        data: { urlsFailed: { increment: 1 }, updatedAt: new Date() }
-      });
+
+        await releaseUrl(jobId, url, true);
+      } catch (err) {
+        console.error(`[worker] error on ${url}:`, err);
+        await db.jobStat.update({
+          where: { jobId },
+          data: { urlsFailed: { increment: 1 }, updatedAt: new Date() }
+        });
+        await releaseUrl(jobId, url, false);
+      }
     }
+  } finally {
+    clearInterval(recovery);
+    await db.crawlJob.update({
+      where: { id: jobId },
+      data: { status: CrawlJobStatus.done, finishedAt: new Date() }
+    });
   }
 }
