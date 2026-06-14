@@ -1,5 +1,6 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
+  "ui":"tui",
   "globalEnv": [
     "DATABASE_URL",
     "REDIS_URL",
@@ -8,6 +9,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "inputs":["$TURBO_DEFAULT$",".env*"],
       "outputs": ["dist/**", "!dist/**/*.map"]
     },
     "check-types": {
