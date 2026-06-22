@@ -4,7 +4,8 @@
   "globalEnv": [
     "DATABASE_URL",
     "REDIS_URL",
-    "BLOB_PATH"
+    "BLOB_PATH",
+    "OPENAI_API_KEY"
   ],
   "tasks": {
     "build": {

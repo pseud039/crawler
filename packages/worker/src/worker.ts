@@ -4,6 +4,8 @@ import { HttpFetcher } from "@crawler/core/src/components/fetchers/http.fetcher.
 import { ReadabilityParser } from "@crawler/core/src/components/parsers/readability.js";
 import { BfsStrategy } from '@crawler/core/src/components/strategies/bfs.strategies.js';
 import { CrawlJobStatus, FrontierUrlStatus } from '@crawler/db/src/prisma.js';
+import type { LoadedComponents } from '@crawler/core/src/registry.js';
+import { loadComponents } from '@crawler/core/src/registry.js';
 import crypto from 'crypto';
 import {
   seedFrontier,
@@ -14,16 +16,25 @@ import {
 } from '@crawler/core/src/frontier/frontier.js';
 
 // Now returns ScoredUrl[] so the worker loop can push to Redis
-async function processUrl(jobId: string, url: string, depth: number) {
-  const fetcher = new HttpFetcher();
-  const parser = new ReadabilityParser();
-  const strategy = new BfsStrategy();
+async function processUrl(jobId: string, url: string, depth: number,components: LoadedComponents) {
+    const { fetcher, parser, strategy, politeness } = components;
 
-  // 1. Fetch
+  // politeness check before fetch
+  const delay = await politeness.getDelay(url);
+  if (delay > 0) await new Promise(r => setTimeout(r, delay));
+
+  const shouldCrawl = await politeness.shouldCrawl(url);
+  if (!shouldCrawl) return [];
+
   const fetchResult = await fetcher.fetch(url);
-  if (fetchResult.error || fetchResult.statusCode >= 400) {
-    return [];  // signal failure — releaseUrl(false) handled in caller
-  }
+  await politeness.onCrawled(url);
+
+
+  // // 1. Fetch
+  // const fetchResult = await fetcher.fetch(url);
+  // if (fetchResult.error || fetchResult.statusCode >= 400) {
+  //   return [];  // signal failure — releaseUrl(false) handled in caller
+  // }
 
   // 2. Store raw_page (deduped by content_hash)
   const hash = crypto.createHash('sha256').update(fetchResult.html).digest('hex');
@@ -85,7 +96,16 @@ export async function runWorker(jobId: string) {
   console.log(`[worker] starting for job ${jobId}`);
 
   const job = await db.crawlJob.findUniqueOrThrow({ where: { id: jobId } });
-
+ // Load components from job config
+  const components = await loadComponents({
+    fetcher:    (job.config as any).fetcher    ?? 'http',
+    parser:     (job.config as any).parser     ?? 'readability',
+    strategy:   (job.config as any).strategy   ?? 'bfs',
+    politeness: (job.config as any).politeness ?? 'standard',
+    revisit:    (job.config as any).revisit    ?? 'none',
+    strategyConfig:   (job.config as any).strategyConfig,
+    politenessConfig: (job.config as any).politenessConfig,
+  });
   // Seed Redis frontier from job's seedUrls
   await seedFrontier(jobId, job.seedUrls);
 
@@ -122,7 +142,7 @@ export async function runWorker(jobId: string) {
       const depth = frontierRow?.depth ?? 0;
 
       try {
-        const scoredUrls = await processUrl(jobId, url, depth);
+        const scoredUrls = await processUrl(jobId, url, depth, components);
 
         // Push discovered links into Redis + Postgres
         if (scoredUrls.length > 0) {
