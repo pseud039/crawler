@@ -6,7 +6,11 @@
     "REDIS_URL",
     "BLOB_PATH",
     "OPENAI_API_KEY",
-    "WORKER_CONCURRENCY"
+    "WORKER_CONCURRENCY",
+    "QDRANT_URL", 
+    "QDRANT_API_KEY", 
+    "QDRANT_COLLECTION",
+    "API_PORT"
   ],
   "tasks": {
     "build": {
