@@ -3,7 +3,7 @@ import * as cheerio from 'cheerio';
 import { JSDOM } from 'jsdom';
 import OpenAI from 'openai';
 import type { ParserComponent } from '../../interfaces/parsers.interface.js';
-import type { ParseResult } from '../../types/shared.js';
+import type { ParseResult,Entity } from '../../types/shared.js';
 
 export class SemanticParser implements ParserComponent {
   name = 'semantic';
@@ -38,14 +38,14 @@ export class SemanticParser implements ParserComponent {
     let embedding: number[] | undefined;
     if (cleanText.trim().length > 0) {
       const truncated = cleanText.slice(0, 8000);
-      const response = await this.getClient().embeddings.create({
+      const response: { data: { embedding: number[] }[] } = await this.getClient().embeddings.create({
         model: 'text-embedding-3-small',
         input: truncated,
       });
-      embedding = response.data[0].embedding;
+      embedding = response.data[0]?.embedding;
     }
 
-    const entities = this.extractEntities(cleanText);
+    const entities: Entity[] = this.extractEntities(cleanText);
 
     return {
       title: article?.title ?? '',
@@ -61,12 +61,12 @@ export class SemanticParser implements ParserComponent {
     };
   }
 
-  private extractEntities(text: string): Array<{ text: string; type: string; confidence: number }> {
+  private extractEntities(text: string): Entity[] {
     const pattern = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/g;
     const matches = new Set<string>();
-    let match;
+    let match: RegExpExecArray | null;
     while ((match = pattern.exec(text)) !== null) {
-      matches.add(match[1]);
+      matches.add(match[1] as string);
     }
     return Array.from(matches)
       .slice(0, 20)
