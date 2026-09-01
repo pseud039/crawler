@@ -3,6 +3,7 @@ import { FrontierUrlStatus } from '@crawler/db/src/prisma.js';
 import { acquireUrl, releaseUrl, pushUrls, recoverExpiredLeases } from '@crawler/core/src/frontier/frontier.js';
 import { loadComponents } from '@crawler/core/src/registry.js';
 import { JobScheduler } from './scheduler.js';
+import { putRawBlob } from '@crawler/core/src/storage/blob.js';
 import crypto from 'crypto';
 
 const WORKER_COUNT = parseInt(process.env.WORKER_CONCURRENCY ?? '5');
@@ -41,11 +42,12 @@ async function processUrl(
   let rawPage = await db.rawPage.findFirst({ where: { contentHash: hash } });
 
   if (!rawPage) {
+    const blobUrl = await putRawBlob(hash, fetchResult.html);
     rawPage = await db.rawPage.create({
       data: {
         url,
         contentHash: hash,
-        blobUrl: `local://${hash}.html`,
+        blobUrl,
         httpStatus: fetchResult.statusCode,
         headers: fetchResult.headers as any,
         fetchedAt: fetchResult.fetchedAt,
@@ -67,6 +69,13 @@ async function processUrl(
         cleanText: parseResult.cleanText,
         metadata: parseResult.metadata,
         wordCount: parseResult.cleanText.split(/\s+/).length,
+        links: parseResult.links,
+        // These are only present when the configured parser produces them
+        // (e.g. the `semantic` parser) — omitted otherwise rather than nulled,
+        // so componentType still tells you what to expect in derivedData.
+        ...(parseResult.embedding ? { embedding: parseResult.embedding } : {}),
+        ...(parseResult.entities ? { entities: parseResult.entities } : {}),
+        ...(parseResult.relevanceScore !== undefined ? { relevanceScore: parseResult.relevanceScore } : {}),
       },
     },
   });

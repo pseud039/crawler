@@ -20,6 +20,19 @@ services:
       - redis_data:/data
     command: redis-server --appendonly yes
 
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: seaweedfs
+    ports:
+      - "9333:9333"   # master UI
+      - "8333:8333"   # S3-compatible gateway — this is what BLOB_S3_ENDPOINT points at
+      - "8888:8888"   # filer
+    command: >
+      server -dir=/data -s3 -s3.port=8333 -filer -master.volumeSizeLimitMB=1024
+    volumes:
+      - seaweedfs_data:/data
+
 volumes:
   postgres_data:
   redis_data:
+  seaweedfs_data:
